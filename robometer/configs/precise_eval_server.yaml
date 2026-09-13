@@ -1,0 +1,31 @@
+# Step 4 inference server for the Precise Wan-VAE progress model.
+#
+#   uv run python robometer/evals/precise_eval_server.py \
+#       model_path=./logs/precise/precise_rgb/ckpt-...  server_port=8000
+#
+# Every key below must exist here to be overridable on the command line without a
+# leading `+` -- Hydra's struct mode rejects undeclared keys.
+
+# Precise checkpoint directory. The experiment config.yaml is read from this
+# directory or its parent, so a `ckpt-pearson_...` dir works directly.
+model_path: ""
+
+# One replica per process. Precise loads the model on cuda:0; run several
+# processes on different ports (and different CUDA_VISIBLE_DEVICES) for more.
+num_gpus: 1
+max_workers: 1
+
+# Clips per forward pass.
+batch_size: 32
+
+# Frames per growing-prefix clip. Must be 4k+1 and <= model.precise.max_len (9).
+# 5 is the shortest legal Wan clip and a bit-exact prefix of the 9-frame clip.
+num_subsampled_frames: 5
+
+# Overrides the checkpoint's pointmap clip bounds, for evaluating a camera whose
+# depth range differs from the training camera. null keeps the trained bounds.
+# Example (sideview): '{x:[-1.0,1.0],y:[-1.2,0.5],z:[0.9,2.2]}'
+pointmap_norm_bounds: null
+
+server_url: "0.0.0.0"
+server_port: 8000

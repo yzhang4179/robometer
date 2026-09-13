@@ -77,7 +77,7 @@ dependencies = [
     "tensorflow==2.19", # just for oxe and other tfds dataset uploading
     "tf-keras>=2.19.0", # just for oxe and other tfds dataset uploading
     "protobuf<3.21", # just for oxe and other tfds dataset uploading
-
+    "torchao==0.13.0",
 ]
 
 [project.urls]

@@ -1,0 +1,90 @@
+# @package _global_
+
+# Step 4 part 2: reward-alignment metrics for the Precise models.
+# Driven by robometer/evals/precise_baseline_eval.py.
+#
+# Deliberately a plain yaml with no schema bound in `defaults`, exactly like the
+# stock baseline_eval_config.yaml: `convert_hydra_to_dataclass` builds
+# PreciseBaselineEvalConfig at the end. Every key that should be overridable on
+# the command line without a leading `+` has to appear here (or in the
+# reward_model group) -- Hydra's struct mode rejects undeclared keys.
+#
+# `_self_` comes first so the reward_model group wins, which is how the stock
+# baseline config lets reward_model/*.yaml supply model_path and model_config.
+defaults:
+  - _self_
+  - reward_model: precise
+
+# NOT set here, on purpose: the progress target convention, the discrete bin
+# count, the success cutoff table and min/max success. Those are read back out of
+# each checkpoint's own config.yaml, so a run cannot score a model under a
+# different data contract than it trained under.
+
+# One or more Precise checkpoint directories. `model_paths` wins when both are
+# set; `model_path` (from the reward_model group) keeps single-model commands
+# reading like the stock ones.
+model_paths: null
+
+# Display names, one per model_paths entry. null -> each checkpoint's own
+# model.precise.modality, which is what you usually want.
+checkpoint_labels: null
+
+# THE CLIP LENGTH: frames per growing-prefix clip, after thinning. Must be 4k+1
+# and <= model.precise.max_len. 9 reproduces the in-training protocol exactly,
+# which is what makes these numbers comparable to the logged save_best pearson.
+# Not to be confused with custom_eval.subsample_n_frames below.
+max_frames: 9
+
+custom_eval:
+  # Precise is progress-only. reward_alignment and policy_ranking are supported;
+  # confusion_matrix and quality_preference are not (no language branch, no
+  # preference head).
+  eval_types: [reward_alignment, policy_ranking]
+
+  # reward_alignment -> pearson (the VOC number), loss, success-head metrics.
+  # Successes only: a failure has no honest ground-truth progress curve.
+  reward_alignment: [precise_square_rbm_square_d1_val]
+
+  # policy_ranking -> kendall, ranking_acc, succ_fail_diff. Each entry is a LIST
+  # of caches loaded together, because the successes and the failures of a split
+  # are separate caches and must share one task string to be ranked against each
+  # other. Robometer computes succ-fail-diff and Kendall only here.
+  policy_ranking:
+    - [precise_square_rbm_square_d1_val, precise_square_rbm_square_d1_val_fail]
+
+  # Growing prefixes, last token read from each -- the deployment protocol.
+  use_frame_steps: true
+
+  # THE NUMBER OF PREFIX ENDPOINTS per trajectory, spread by linspace over the
+  # trajectory. 9 endpoints x 9-frame clips is what training used. Different
+  # thing from max_frames above.
+  subsample_n_frames: 9
+
+  # Every prefix must reach the clip length; short ones repeat their last frame.
+  pad_frames: true
+
+  # null = every trajectory in the dataset (35 for the validation split).
+  reward_alignment_max_trajectories: null
+
+  custom_eval_random_seed: 42
+
+  # null -> every trajectory of every quality tier. The stock default of 5 per
+  # tier exists to keep a 1M-row eval affordable; our splits are ~60 trajectories.
+  num_examples_per_quality_pr: null
+
+  # null -> every task with two or more quality tiers (we have exactly one task).
+  policy_ranking_max_tasks: null
+
+  # Unused by Precise; declared so the composed config stays complete.
+  confusion_matrix: []
+  quality_preference: []
+  comparisons_per_task: null
+  max_comparisons: null
+  num_partial_successes: null
+  confusion_matrix_n_trajectories_per_source: null
+
+# null -> ./baseline_eval_output/precise
+output_dir: null
+
+server_url: "0.0.0.0"
+server_port: 8001

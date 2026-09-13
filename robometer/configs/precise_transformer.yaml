@@ -1,0 +1,225 @@
+# @package _global_
+
+# Step 3 preset for the Precise Wan-VAE progress model. The three experiments
+# differ only in model.precise.modality; keep every other field fixed so their
+# comparison is fair.
+defaults:
+  - config
+  - _self_
+
+mode: train
+debug: false
+trainer_cls: precise_transformer
+
+# =====================================================================================
+# Model
+# =====================================================================================
+model:
+  base_model_id: precise_transformer
+  model_type: precise_transformer
+  torch_dtype: bfloat16
+  trust_remote_code: false
+
+  # The Wan encoder is frozen and held outside model.parameters(). The small
+  # transformer and its progress/success heads are trained in full.
+  train_vision_encoder: false
+  train_language_model: false
+  train_progress_head: true
+  train_preference_head: false
+  train_success_head: true
+  use_peft: false
+  peft_vision_encoder: false
+  quantization: false
+  use_unsloth: false
+
+  # These language-model-specific switches are deliberately off for Precise.
+  average_temporal_patches: false
+  use_per_frame_progress_token: false
+  use_multi_image: false
+
+  progress_loss_type: ${loss.progress_loss_type}
+  progress_discrete_bins: ${loss.progress_discrete_bins}
+
+  precise:
+    # rgb | pointmap | rgb_pointmap
+    modality: rgb_pointmap
+
+    hidden_dim: 512
+    num_layers: 6
+    num_attention_heads: 8
+    mlp_ratio: 4
+    dropout: 0.1
+    max_len: 9
+
+    # 16x16 VAE latents become an 8x8 token grid. Step 2 measured the VAE,
+    # rather than this transformer, as the runtime bottleneck.
+    latent_patch_size: 2
+    prog_block_causal: false
+    rope_theta: 10000.0
+
+    vae_model_id: Wan-AI/Wan2.2-TI2V-5B-Diffusers
+    vae_dtype: bfloat16
+    vae_keep_decoder: false
+    vae_z_dim: 48
+    vae_spatial_ratio: 16
+    vae_temporal_ratio: 4
+    scale_latents: true
+    frame_size: 256
+
+    # Exp 3 only: prepend one token built from the trajectory's `lang_vector`, so
+    # "lift to 5 cm" and "lift to 20 cm" are distinguishable. false = exp-1 model.
+    use_lang_token: false
+    lang_vector_dim: 384
+
+    progress_loss_type: ${loss.progress_loss_type}
+    progress_discrete_bins: ${loss.progress_discrete_bins}
+
+    # Raw camera-frame metres are clamped and normalised only inside the model.
+    pointmap_norm_bounds:
+      x: [-0.6, 0.6]
+      y: [-1.0, 0.25]
+      z: [0.2, 1.3]
+
+# =====================================================================================
+# Data
+# =====================================================================================
+data:
+  # Training uses the 577 successful D1 demonstrations. In-training reward
+  # alignment uses only the 35-success validation cache. Failure and side-view
+  # files remain held out for Step 4's qualitative evaluation.
+  train_datasets: [precise_square_rbm_square_d1_train]
+  eval_datasets: [precise_square_rbm_square_d1_val]
+  dataset_type: rbm
+  eval_subset_size: null
+
+  load_embeddings: false
+  max_frames_after_preprocessing: 32
+  max_frames: 9
+  min_frames_per_trajectory: 5
+  resized_height: null
+  resized_width: null
+  use_multi_image: false
+  use_per_frame_progress_token: false
+  shuffle_progress_frames: false
+
+  # Progress samples only. The first (different-instruction) strategy is invalid
+  # in this single-task study; forward, reverse, and rewind remain enabled.
+  sample_type_ratio: [0, 1, 0]
+  progress_strategy_ratio: [0, 1, 1, 1]
+  preference_strategy_ratio: [0, 0, 0, 0]
+  progress_pred_type: absolute_first_frame
+  dataset_success_cutoff_file: robometer/data/dataset_success_cutoff_precise.txt
+
+  shuffle: true
+  seed: 42
+  max_trajectories: -1
+  dataloader_pin_memory: true
+  dataloader_num_workers: 8
+  dataloader_persistent_workers: true
+
+  min_success: 0.5
+  max_success: 1.0
+  partial_success_threshold: 0.2
+  predict_last_frame_partial_progress: false
+  progress_loss_type: ${loss.progress_loss_type}
+  progress_discrete_bins: ${loss.progress_discrete_bins}
+
+# =====================================================================================
+# Evaluation during training
+# =====================================================================================
+custom_eval:
+  eval_types: [reward_alignment]
+  policy_ranking: []
+  confusion_matrix: []
+  quality_preference: []
+  reward_alignment: [precise_square_rbm_square_d1_val]
+
+  custom_eval_random_seed: 42
+  reward_alignment_max_trajectories: null  # all 35 successful validation trajectories
+  use_frame_steps: true
+  subsample_n_frames: 9                    # nine prefix endpoints per trajectory
+  pad_frames: true                         # every prefix must reach Wan's required 9 frames
+
+# =====================================================================================
+# Optimisation -- one RTX 4090
+# =====================================================================================
+training:
+  num_gpus: 1
+  output_dir: ./logs/precise
+  exp_name: precise_rgb_pointmap
+  overwrite_output_dir: false
+
+  # Step 2 measured batch 16 at 5.13 GB (one stream) / 5.20 GB (two streams)
+  # peak allocated VRAM, so one fixed batch keeps all three comparisons fair and
+  # leaves substantial room for CUDA/runtime overhead on a 24 GB RTX 4090.
+  per_device_train_batch_size: 20
+  per_device_eval_batch_size: 20
+  gradient_accumulation_steps: 1
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  max_steps: 20000
+  num_train_epochs: -1
+  lr_scheduler_type: cosine
+  warmup_steps: 0
+  warmup_ratio: 0.01
+  max_grad_norm: 1.0
+
+  bf16: true
+  fp16: false
+  gradient_checkpointing: false
+  remove_unused_columns: false
+  ddp_find_unused_parameters: false
+  ddp_bucket_cap_mb: 25
+  vision_encoder_lr: null
+  vision_encoder_num_layers: 0
+  predict_pref_progress: false
+
+  evaluation_strategy: steps
+  eval_steps: 250
+  custom_eval_steps: 250
+  do_eval: true
+  run_default_eval: false
+  prediction_loss_only: true
+
+  # Standard Trainer checkpoints keep optimizer/scheduler/RNG state and are the
+  # source for an exact full resume. save_total_limit=2 comes from the shared
+  # TrainingArguments helper; metric-best checkpoints are managed separately.
+  save_strategy: steps
+  save_steps: 1000
+  logging_steps: 10
+  dataloader_pin_memory: ${data.dataloader_pin_memory}
+  dataloader_num_workers: ${data.dataloader_num_workers}
+  dataloader_persistent_workers: ${data.dataloader_persistent_workers}
+  load_from_checkpoint: null
+  resume_from_checkpoint: null
+
+# Supervise all nine progress tokens. PreciseTrainer additionally logs the
+# leak-free last-token loss/accuracy from the same forward pass.
+loss:
+  predict_last_frame_progress: false
+  progress_loss_type: discrete
+  progress_discrete_bins: 10
+  success_positive_weight: 1.0
+
+# =====================================================================================
+# Logging/checkpoints
+# =====================================================================================
+logging:
+  save_model: true
+  save_processor: false
+  log_to: [wandb]
+  wandb_project: precise_robometer
+  wandb_entity: null
+  wandb_notes: "Precise Step 3: discrete progress + success on MimicGen square D1"
+  wandb_mode: null
+  log_level: INFO
+
+  save_best:
+    metric_names: [eval_rew_align/pearson_precise_square_rbm_square_d1_val]
+    greater_is_better: [true]
+    keep_top_k: 3
+    save_every: null
+    upload_to_hub: false
+    hub_save_every: null
+    hub_token: null
+    hub_private: false

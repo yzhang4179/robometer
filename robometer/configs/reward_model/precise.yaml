@@ -1,0 +1,22 @@
+# @package _global_
+
+# Precise (Wan-VAE progress transformer) reward model.
+#
+# New file, added alongside rbm.yaml / rewind.yaml rather than editing them, so
+# `reward_model=precise` composes the same way every other baseline does.
+# It is only understood by robometer/evals/precise_baseline_eval.py; the stock
+# run_baseline_eval.py will compose it and then raise a clear ValueError from
+# BaselineEvalConfig.__post_init__, which is the correct outcome.
+reward_model: "precise"
+
+# Single checkpoint. precise_baseline_eval.py also accepts model_paths=[a,b,c]
+# to score all three modalities in one process.
+model_path: null
+
+model_config:
+  batch_size: 32
+  device: cuda
+  # Override the checkpoints' pointmap clip bounds for a camera whose depth range
+  # differs from the training camera; null keeps the trained bounds. Example:
+  #   'model_config.pointmap_norm_bounds={x:[-1.0,1.0],y:[-1.2,0.5],z:[0.9,2.2]}'
+  pointmap_norm_bounds: null
